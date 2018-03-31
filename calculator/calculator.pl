@@ -2,7 +2,6 @@
 use strict;
 use IO::Socket;
 use threads;
-use Thread::Suspend 'SIGUSR1';  
 use Thread::Suspend; 
 use threads::shared;
 BEGIN {
