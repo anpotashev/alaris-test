@@ -3,6 +3,7 @@ use strict;
 use IO::Socket;
 use threads;
 use Thread::Suspend; 
+use Thread::Queue;
 use threads::shared;
 BEGIN {
   push( @INC, "../pm/");
@@ -47,12 +48,37 @@ my $msg;
 my $isAlive = 1;
 share($isAlive);
 
+#ThreadPool
+my $threadQueue = Thread::Queue->new();
+my $freeThreadCount = 0;
+share($freeThreadCount);
+my $minFreeThreadCount = 2;
+
+sub processGettedMessages() {
+  while (1) {
+    while (my $arg = $threadQueue->dequeue()) {
+      my ($msg) = @$arg;
+      calculate($msg);
+      $freeThreadCount++;
+    }
+  }
+}
+
+sub checkForFreeThreadInQueue {
+  while ($freeThreadCount < $minFreeThreadCount) {
+    threads->create('processGettedMessages');
+    $freeThreadCount++;
+  }
+}
+
+
 sub readSocket {
   while ($server->recv($msg, 1024)) {
     #my($port, $ipaddr) = sockaddr_in($server->peername);
     #my $otherhost = gethostbyaddr($ipaddr, AF_INET);
     if ($isAlive) {
-      threads->create('calculate', $msg);
+      checkForFreeThreadInQueue();
+      $threadQueue->enqueu($msg);
     }
   }
 }

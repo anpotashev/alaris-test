@@ -3,6 +3,7 @@ use strict;
 use IO::Socket;
 use threads;
 use threads::shared;
+use Thread::Queue;
 use JSON;
 BEGIN {
   push( @INC, "../pm/");
@@ -30,15 +31,41 @@ my $msg;
 my %calculators = ();
 share(%calculators);
 
+#ThreadPool
+my $threadQueue = Thread::Queue->new();
+my $freeThreadCount = 0;
+share($freeThreadCount);
+my $minFreeThreadCount = 2;
+
+sub processGettedMessages() {
+  while (1) {
+    while (my $arg = $threadQueue->dequeue()) {
+      my ($msg, $otherHost) = @$arg;
+      $freeThreadCount--;
+      if (isPing($msg)) {
+        gotPing($otherHost, $msg);
+      } else {
+        sendResponse($server, $msg);
+      }
+      $freeThreadCount++;
+    }
+  }
+}
+
+sub checkForFreeThreadInQueue {
+  while ($freeThreadCount < $minFreeThreadCount) {
+    threads->create('processGettedMessages');
+    $freeThreadCount++;
+  }
+}
+
 sub readSocket() {
   while ($server->recv($msg, 1024, 0)) {
     my($port, $ipaddr) = sockaddr_in($server->peername);
-    my $otherhost = gethostbyaddr($ipaddr, AF_INET);
-    if (isPing($msg)) {
-      threads->create('gotPing', $otherhost, $msg);
-    } else {
-      threads->create('sendResponse', $server, $msg);
-    }
+    my $otherHost = gethostbyaddr($ipaddr, AF_INET);
+    my @arg = ($msg, $otherHost);
+    checkForFreeThreadInQueue();
+    $threadQueue->enqueue(\@arg);
   }
 }
 
