@@ -61,9 +61,8 @@ my $minFreeThreadCount = 2;
 sub processGettedMessages() {
   while (1) {
     while (my $arg = $threadQueue->dequeue()) {
-      my ($msg) = @$arg;
       $freeThreadCount--;
-      calculate($msg);
+      calculate($arg);
       $freeThreadCount++;
     }
   }
@@ -79,8 +78,6 @@ sub checkForFreeThreadInQueue {
 
 sub readSocket {
   while ($server->recv($msg, 1024)) {
-    #my($port, $ipaddr) = sockaddr_in($server->peername);
-    #my $otherhost = gethostbyaddr($ipaddr, AF_INET);
     if ($isAlive) {
       checkForFreeThreadInQueue();
       $threadQueue->enqueue($msg);
