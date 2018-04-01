@@ -58,6 +58,7 @@ sub processGettedMessages() {
   while (1) {
     while (my $arg = $threadQueue->dequeue()) {
       my ($msg) = @$arg;
+      $freeThreadCount--;
       calculate($msg);
       $freeThreadCount++;
     }
