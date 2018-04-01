@@ -35,6 +35,10 @@ my $dispatcher = IO::Socket::INET->new(%dispatcherProps)
 #'calculator' net-settings
 my $connSetting = ConnSetting->new("calculator_net.json");
 my %connProps = %{$connSetting->getProps()};
+if (defined $ARGV[0]) {
+  print "$ARGV[0]\n";
+  $connProps{LocalPort} = $ARGV[0];
+}
 my $server = IO::Socket::INET->new(%connProps)
   or die "Couldn't create server";
 
@@ -79,7 +83,7 @@ sub readSocket {
     #my $otherhost = gethostbyaddr($ipaddr, AF_INET);
     if ($isAlive) {
       checkForFreeThreadInQueue();
-      $threadQueue->enqueu($msg);
+      $threadQueue->enqueue($msg);
     }
   }
 }
