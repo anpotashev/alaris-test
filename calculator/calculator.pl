@@ -3,7 +3,7 @@ use strict;
 use IO::Socket;
 use threads;
 use Thread::Suspend; 
-use Thread::Queue;
+#use Thread::Queue;
 use threads::shared;
 BEGIN {
   push( @INC, "../pm/");
@@ -31,12 +31,12 @@ my $dispatcherSetting = ConnSetting->new("dispatcher_net.json");
 my %dispatcherProps = %{$dispatcherSetting->getProps()};
 my $dispatcher = IO::Socket::INET->new(%dispatcherProps)
   or die "Couldn't connect to server\n";
+
 ##############
 #'calculator' net-settings
 my $connSetting = ConnSetting->new("calculator_net.json");
 my %connProps = %{$connSetting->getProps()};
 if (defined $ARGV[0]) {
-  print "$ARGV[0]\n";
   $connProps{LocalPort} = $ARGV[0];
 }
 my $server = IO::Socket::INET->new(%connProps)
@@ -52,35 +52,10 @@ my $msg;
 my $isAlive = 1;
 share($isAlive);
 
-#ThreadPool
-my $threadQueue = Thread::Queue->new();
-my $freeThreadCount = 0;
-share($freeThreadCount);
-my $minFreeThreadCount = 2;
-
-sub processGettedMessages() {
-  while (1) {
-    while (my $arg = $threadQueue->dequeue()) {
-      $freeThreadCount--;
-      calculate($arg);
-      $freeThreadCount++;
-    }
-  }
-}
-
-sub checkForFreeThreadInQueue {
-  while ($freeThreadCount < $minFreeThreadCount) {
-    threads->create('processGettedMessages');
-    $freeThreadCount++;
-  }
-}
-
-
-sub readSocket {
+sub calculator {
   while ($server->recv($msg, 1024)) {
     if ($isAlive) {
-      checkForFreeThreadInQueue();
-      $threadQueue->enqueue($msg);
+      threads->create('calculate', $msg, $server);
     }
   }
 }
@@ -95,7 +70,7 @@ sub pingDispatcher {
 
 #sleep random time and send request to 'dispatcher'
 sub calculate {
-  my ($arg) = @_;
+  my ($arg, $srv) = @_;
   my $timeout = $minCalcDelay + rand($deltaCalcDelay);
   sleep $timeout;
   my %v = %{decode_json($arg)};
@@ -104,7 +79,7 @@ sub calculate {
   my $jsonRes = encode_json \%result;
   while (!$isAlive) { sleep 1; }
   if ($isAlive) {
-    $server->send($jsonRes);
+    $srv->send($jsonRes);
   }
 }
 
@@ -128,7 +103,7 @@ sub kvur {
 #emulate 'death' for random timeout.
 sub pauseWork {
   my @threads = @_;
-  while('true') {
+  while(1) {
     if (rand(1)<$notWorkingProbability) {
       my $timeout = rand($notWorkingMaxTimeout);
       $isAlive = 0;
@@ -145,9 +120,20 @@ sub pauseWork {
   }
 }
 
+#detach finished thread
+sub detachFinishedThread {
+  foreach(threads->list()) {
+    my $thread = $_;
+    if (!$thread->is_running() && $thread->is_joinable()) {
+      $thread->detach();
+    }
+  }
+}
+
 #print statistic.
 sub printState {
   while (1) {
+    detachFinishedThread();
     print "\033[2J";
     print "\033[0;0H";
     my $state = $isAlive ? "running" : "dead";
@@ -162,10 +148,7 @@ $state
   }
 }
 
-
-my $thread = threads->create('readSocket');
 my $pingThread = threads->create('pingDispatcher');
 threads->create('pauseWork', $pingThread);
 threads->create('printState');
-
-sleep;
+calculator();

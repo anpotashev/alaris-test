@@ -2,8 +2,9 @@
 use strict;
 use IO::Socket;
 use threads;
-use JSON;
 use threads::shared;
+use Thread::Queue;
+use JSON;
 use List::Util qw( min max sum );
 BEGIN {
   push( @INC, "../pm/");
@@ -17,114 +18,124 @@ my %clientProps = %{$clientSetting->getProps()};
 my $range = $clientProps{Range};
 #Timeout 'waiting' response.
 my $maxRequestLive = $clientProps{MaxRequestLive};
+my $maxWaitTime = 10;
 
+#Statistic
 #total request
 my $counter = 0;
 share($counter);
+#workingCounter
+my $workCounter = 0;
+share($workCounter);
 #'got response' counter
 my $successCounter = 0;
 share($successCounter);
 #'timed out' request counter
-my $faildRequestCounter = 0;
-share($faildRequestCounter);
+my $faildCounter = 0;
+share($faildCounter);
 #received timeout
 my @successTimes = ();
 share(@successTimes);
-
-my %requests = ();
-share(%requests);
 
 #Network setting
 my $connSetting = ConnSetting->new("client_net.json");
 my %connProps = %{$connSetting->getProps()};
 
-my $client = IO::Socket::INET->new(%connProps)
-  or die "Couldn't connect to server\n";
+#ThreadPool
+my $threadQueue = Thread::Queue->new();
+my $freeThreadCount = 0;
+share($freeThreadCount);
+my $minFreeThreadCount = 2;
+
+sub newTask {
+  while (1) {
+    while (my $arg = $threadQueue->dequeue()) {
+      $freeThreadCount--; $counter++; $workCounter++; my $startTime = time();
+      my $client = IO::Socket::INET->new(%connProps)
+        or die "Couldn't connect to server\n";
+      ;
+      $client->send(prepareRequest());
+      $client->setsockopt(SOL_SOCKET, SO_RCVTIMEO, pack('l!l!', $maxRequestLive, 0)) or die "setsockopt: $!";
+      printStat();
+      my $msg;
+      if($client->recv($msg, 1024, 0)) {
+        $successCounter++;
+        my $workTime = time() - $startTime;
+        push @successTimes, $workTime;
+      } else {
+        $faildCounter++;
+      }
+      $workCounter--;
+      printStat();
+      $client->close();
+      $freeThreadCount++;
+    }
+  }
+}
+
+sub checkForFreeThreadInQueue {
+  while ($freeThreadCount < $minFreeThreadCount) {
+    threads->create('newTask');
+    $freeThreadCount++;
+  }
+}
+
 
 #sleep random time, then send request to 'dispatcher'
 sub client {
   while (1) {
     sleep rand($range);
-    sendRequest();
+    checkForFreeThreadInQueue();
+    $threadQueue->enqueue(1);
   }
 }
 
-#listen for answers
-sub getAnswers {
-  my $msg;
-  while($client->recv($msg, 1024, 0)) {
-    updateStat($msg);
-  }
-}
-
-#Send request to 'dispatcher'
-sub sendRequest {
-  $requests{++$counter} = time();
+#prepared jsonString for request to 'dispatcher'
+sub prepareRequest {
   my $args = {
 	'id'=>$counter
 	, 'a'=>rand($range)
 	, 'b'=>rand($range)
 	, 'c'=>rand($range)
   };
-  my $jsonString = encode_json \%$args;
-  $client->send($jsonString);
+  return encode_json \%$args;
 }
 
-#print statistic. Update every second.
-sub printStat {
+#detach finished thread
+sub detachFinishedThread {
   while (1) {
-    my $sum = sum 0, @successTimes;
-    my $min = min @successTimes;
-    if (!defined $min) { $min = 0; }
-    $min = $min + 0;
-    my $max = max 0, @successTimes;
-    my $avr = 0;
-    if ($successCounter > 0) { $avr = sprintf "%.2f", $sum/$successCounter; }
-    my $processing = keys %requests;
-    #https://stackoverflow.com/questions/197933/whats-the-best-way-to-clear-the-screen-in-perl
-    print "\033[2J";
-    print "\033[0;0H";
-    format = 
-+-------+---------+----------+--------+---------+---------+---------+
-|               count                 |           timeout           |
-| total | success | prossing | failed | minimum | maximum | average |
-+-------+---------+----------+--------+---------+---------+---------+
-| @|||| | @|||||| | @||||||| | @||||| | @|||||| | @|||||| | @|||||| |
-$counter, $successCounter, $processing, $faildRequestCounter, $min, $max, $avr
-+-------+---------+----------+--------+---------+---------+---------+
-.
-    write; 
-    sleep 1;
-  }
-}
-
-#run when got response. update statistic information.
-sub updateStat {
-  my ($arg) = @_;
-  my %v = %{decode_json($arg)};
-  my $id = $v{id};
-  if (defined $requests{$id}) {
-    my $t = time() - $requests{$id};
-    $successCounter++;
-    push @successTimes, $t;
-    delete $requests{$v{id}}; 
-  }
-}
-
-sub deleteTimedOutTasks {
-  while(1) {
-    my $id;
-    foreach $id (keys %requests) {
-      if (time() > $requests{$id} + $maxRequestLive ) {
-        delete $requests{$id};
-        $faildRequestCounter++; 
+    foreach(threads->list()) {
+      my $thread = $_;
+      if (!$thread->is_running() && $thread->is_joinable()) {
+        $thread->detach();
       }
     }
-    sleep 1;
   }
 }
 
-threads->create('getAnswers');
-threads->create('printStat');
-threads->create('deleteTimedOutTasks');
+#print statistic.
+sub printStat {
+  my $sum = sum 0, @successTimes;
+  my $min = min @successTimes;
+  if (!defined $min) { $min = 0; }
+  $min = $min + 0;
+  my $max = max 0, @successTimes;
+  my $avr = 0;
+  if ($successCounter > 0) { $avr = sprintf "%.2f", $sum/$successCounter; }
+  #https://stackoverflow.com/questions/197933/whats-the-best-way-to-clear-the-screen-in-perl
+  print "\033[2J";
+  print "\033[0;0H";
+  format = 
++-------+---------+------------+--------+---------+---------+---------+
+|                count                  |           timeout           |
+| total | success | processing | failed | minimum | maximum | average |
++-------+---------+------------+--------+---------+---------+---------+
+| @|||| | @|||||| | @||||||||| | @||||| | @|||||| | @|||||| | @|||||| |
+$counter, $successCounter, $workCounter, $faildCounter, $min, $max, $avr
++-------+---------+------------+--------+---------+---------+---------+
+.
+  write; 
+}
+
+threads->create('detachFinishedThread');
 client();

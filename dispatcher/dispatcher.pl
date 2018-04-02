@@ -37,16 +37,16 @@ my $freeThreadCount = 0;
 share($freeThreadCount);
 my $minFreeThreadCount = 2;
 
-sub processGettedMessages() {
+#client requests
+my $requestCounter = 0;
+my %clientResp = ();
+
+sub processGettedMessages {
   while (1) {
     while (my $arg = $threadQueue->dequeue()) {
       my ($msg, $otherHost) = @$arg;
       $freeThreadCount--;
-      if (isPing($msg)) {
-        gotPing($otherHost, $msg);
-      } else {
-        sendResponse($server, $msg);
-      }
+      gotPing($otherHost, $msg);
       $freeThreadCount++;
     }
   }
@@ -59,13 +59,17 @@ sub checkForFreeThreadInQueue {
   }
 }
 
-sub readSocket() {
+sub dispatcher {
   while ($server->recv($msg, 1024, 0)) {
     my($port, $ipaddr) = sockaddr_in($server->peername);
     my $otherHost = gethostbyaddr($ipaddr, AF_INET);
-    my @arg = ($msg, $otherHost);
-    checkForFreeThreadInQueue();
-    $threadQueue->enqueue(\@arg);
+    if (isPing($msg)) {
+      my @arg = ($msg, $otherHost);
+      checkForFreeThreadInQueue();
+      $threadQueue->enqueue(\@arg);
+    } else {
+      threads->create('sendResponse',$server, $msg);
+    }
   }
 }
 
@@ -109,20 +113,18 @@ $connProps{LocalPort}
 #Every second check list of 'calculators' for 'dead'
 sub checkAliveCalculators {
   while (1) {
-  #print "checking for dead calculator\n";
   foreach (keys %calculators) {
     my $url = $_;
     if (time() > $calculators{$url} + $pingDelay) {
       delete $calculators{$url};
     }
   }
-  printCurrentAliveCalculators();
   sleep 1;
   }
 }
 
 #Forward request to random 'calculator' and send response to client.
-sub sendResponse() {
+sub sendResponse {
   my ($srv, $msg) = @_;
   my $endTime = time() + $maxRequestLive;
   my $done = 0;
@@ -140,7 +142,7 @@ sub sendResponse() {
     if ($res) { 
       $srv->send($res);
       $calculators{$calculator} = time();
-      $done = 1; 
+      $done = 1;
     } 
   }
 }
@@ -150,7 +152,7 @@ sub sendTask {
   my ($host, $port, $msg) = @_;
   my $startTime = time();
   my $client = IO::Socket::INET->new(PeerPort=>$port, Proto=>"udp", PeerAddr=>"$host") or die "Couldn't connect to server\n";
-  $client -> send($msg);
+  $client->send($msg);
   $client->setsockopt(SOL_SOCKET, SO_RCVTIMEO, pack('l!l!', $maxWaitTime, 0))
     or die "setsockopt: $!";
   if ($client->recv($msg, 1024)) {
@@ -161,6 +163,21 @@ sub sendTask {
   return 0;
 }
 
+#detach finished thread
+sub detachFinishedThread {
+  while (1) {
+    foreach(threads->list()) {
+      my $thread = $_;
+      if (!$thread->is_running() && $thread->is_joinable()) {
+        $thread->detach();
+      }
+    }
+    sleep 1;
+  }
+}
+
+
 threads->create('checkAliveCalculators');
-readSocket();
+threads->create('detachFinishedThread');
+dispatcher();
 

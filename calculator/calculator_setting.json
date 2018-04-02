@@ -1,7 +1,7 @@
 {
 	"MinCalcDelay":1
-	,"MaxCalcDelay":5
-	,"PingTimeout":15
+	,"MaxCalcDelay":3
+	,"PingTimeout":5
 	,"NotWorkingMaxTimeout":10
 	,"NotWorkingProbability":0.1
 }

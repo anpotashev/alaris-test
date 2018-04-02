@@ -1,5 +1,5 @@
 {
-  "MaxWaitTime":10
-  ,"MaxRequestLive":60
+  "MaxWaitTime":3
+  ,"MaxRequestLive":18
   ,"PingDelay":15
 }
