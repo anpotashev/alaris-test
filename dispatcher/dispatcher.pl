@@ -38,8 +38,16 @@ share($freeThreadCount);
 my $minFreeThreadCount = 2;
 
 #client requests
-my $requestCounter = 0;
 my %clientResp = ();
+#Statistic
+my $totalCounter = 0;
+share($totalCounter);
+my $runningCounter = 0;
+share($runningCounter);
+my $totalSuccessCounter = 0;
+share($totalSuccessCounter );
+my $totalFailedCounter = 0;
+share($totalFailedCounter );
 
 sub processGettedMessages {
   while (1) {
@@ -106,6 +114,14 @@ $connProps{LocalPort}
 | ^||||||||||||||||||||| | ~~
   $text
 +------------------------+
+
+Request:
++-------+--------+---------+--------+
+| total | running| success | failed |
++-------+--------+---------+--------+
+| @|||| | @||||| | @|||||| | @||||| |
+$totalCounter, $totalSuccessCounter, $runningCounter, $totalFailedCounter
++-------+--------+---------+--------+
 .
   write;
 }
@@ -126,6 +142,8 @@ sub checkAliveCalculators {
 #Forward request to random 'calculator' and send response to client.
 sub sendResponse {
   my ($srv, $msg) = @_;
+  $totalCounter++;
+  $runningCounter++;
   my $endTime = time() + $maxRequestLive;
   my $done = 0;
   while (!$done && time() < $endTime) {
@@ -133,6 +151,8 @@ sub sendResponse {
       sleep 1;
     }
     if (keys %calculators == 0) {
+      $runningCounter--;
+      $totalFailedCounter++;
       return;
     }
     my @aliveHosts = (keys %calculators);
@@ -142,6 +162,8 @@ sub sendResponse {
     if ($res) { 
       $srv->send($res);
       $calculators{$calculator} = time();
+      $runningCounter--;
+      $totalSuccessCounter++;
       $done = 1;
     } 
   }
