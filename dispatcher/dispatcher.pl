@@ -162,11 +162,14 @@ sub sendResponse {
     if ($res) { 
       $srv->send($res);
       $calculators{$calculator} = time();
-      $runningCounter--;
       $totalSuccessCounter++;
+      $runningCounter--;
       $done = 1;
+      return;
     } 
   }
+  $runningCounter--;
+  $totalFailedCounter++;
 }
 
 #Send request to 'calculator'. If no response return 0.
