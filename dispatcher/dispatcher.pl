@@ -120,7 +120,7 @@ Request:
 | total | running| success | failed |
 +-------+--------+---------+--------+
 | @|||| | @||||| | @|||||| | @||||| |
-$totalCounter, $totalSuccessCounter, $runningCounter, $totalFailedCounter
+$totalCounter, $runningCounter, $totalSuccessCounter, $totalFailedCounter
 +-------+--------+---------+--------+
 .
   write;
